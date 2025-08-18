@@ -8,12 +8,25 @@ import json
 import io
 from datetime import datetime
 
+# AMENDMENT START
 def download_spacy_model():
+    """
+    Checks if the spaCy model is downloaded, and downloads it if it isn't.
+    This is the recommended approach for Streamlit Community Cloud.
+    """
     try:
         import spacy
-        spacy.load("en_core_web_sm")
+        nlp = spacy.load("en_core_web_sm")
     except OSError:
-        subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        st.info("Downloading spaCy model 'en_core_web_sm'...")
+        with st.spinner("This may take a moment..."):
+            import spacy.cli
+            spacy.cli.download("en_core_web_sm")
+            st.success("Model downloaded successfully!")
+
+# Call the function at the start of the app to ensure the model is present
+download_spacy_model()
+# AMENDMENT END
 
 # Page configuration
 st.set_page_config(
