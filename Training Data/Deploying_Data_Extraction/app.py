@@ -1,41 +1,36 @@
 import streamlit as st
-import subprocess
-import sys
 import pandas as pd
 import time
-from extractors import EnsembleVotingExtractor
 import json
 import io
 from datetime import datetime
+from extractors import EnsembleVotingExtractor
+import spacy
 
-# AMENDMENT START
-def download_spacy_model():
+# --- spaCy model loader ---
+@st.cache_resource
+def load_spacy_model():
     """
-    Checks if the spaCy model is downloaded, and downloads it if it isn't.
-    This is the recommended approach for Streamlit Community Cloud.
+    Loads the spaCy model. Downloads it if not available.
+    Cached so it only runs once per session.
     """
     try:
-        import spacy
-        nlp = spacy.load("en_core_web_sm")
+        return spacy.load("en_core_web_sm")
     except OSError:
-        st.info("Downloading spaCy model 'en_core_web_sm'...")
-        with st.spinner("This may take a moment..."):
-            import spacy.cli
+        with st.spinner("Downloading spaCy model 'en_core_web_sm'..."):
             spacy.cli.download("en_core_web_sm")
-            st.success("Model downloaded successfully!")
+        return spacy.load("en_core_web_sm")
 
-# Call the function at the start of the app to ensure the model is present
-download_spacy_model()
-# AMENDMENT END
+nlp = load_spacy_model()
 
-# Page configuration
+# --- Page configuration ---
 st.set_page_config(
     page_title="ML Entity Extraction Pipeline",
     page_icon="🤖",
     layout="wide"
 )
 
-# Initialize session state
+# --- Session state ---
 if 'ensemble' not in st.session_state:
     st.session_state.ensemble = None
 if 'is_trained' not in st.session_state:
@@ -46,19 +41,18 @@ if 'results_df' not in st.session_state:
 st.title("🤖 Real-time ML Entity Extraction Pipeline")
 st.markdown("Multi-Model Ensemble with Voting for unstructured data classification")
 
-# Sidebar for configuration
+# --- Sidebar ---
 st.sidebar.header("Configuration")
 batch_size = st.sidebar.slider("Batch Size", min_value=10, max_value=500, value=100)
 show_intermediate = st.sidebar.checkbox("Show Intermediate Results", value=True)
 show_model_breakdown = st.sidebar.checkbox("Show Model Breakdown", value=False)
 
-# Main content area
+# --- Main content ---
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.header("Data Upload & Processing")
     
-    # File upload
     uploaded_file = st.file_uploader(
         "Upload your CSV file with unstructured data",
         type=['csv'],
@@ -71,10 +65,9 @@ with col1:
         st.subheader("Data Preview")
         st.dataframe(df.head(), use_container_width=True)
         
-        # Show data info
         st.info(f"📊 Loaded {len(df)} rows with {len(df.columns)} columns")
         
-        # Training section
+        # --- Training section ---
         st.subheader("Model Training")
         
         if st.button("🎯 Train Ensemble Models", type="primary"):
@@ -85,20 +78,17 @@ with col1:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    # Initialize ensemble
-                    st.session_state.ensemble = EnsembleVotingExtractor()
+                    # Initialize ensemble with cached spaCy model
+                    st.session_state.ensemble = EnsembleVotingExtractor(nlp=nlp)
                     
-                    # Simulate training progress (adapt to your actual training)
                     training_steps = ["SpaCy NER", "Hybrid Extractor", "Template ML", "Advanced Ensemble"]
                     
                     for i, step in enumerate(training_steps):
                         status_text.text(f"Training {step}...")
                         progress_bar.progress((i + 1) / len(training_steps))
                         
-                        # Your actual training would go here
-                        # For demo, we'll use a subset of data
-                        train_texts = df['text'].tolist()[:min(1000, len(df))]  # Limit for demo
-                        train_labels = [{}] * len(train_texts)  # Adapt to your labels
+                        train_texts = df['text'].tolist()[:min(1000, len(df))]
+                        train_labels = [{}] * len(train_texts)  # adapt to your labels
                         
                         if step == "SpaCy NER":
                             st.session_state.ensemble.spacy_extractor.train(train_texts, train_labels)
@@ -113,57 +103,46 @@ with col1:
                     status_text.text("✅ All models trained successfully!")
                     st.success("🎉 Training completed!")
         
-        # Processing section
+        # --- Processing section ---
         if st.session_state.is_trained and st.session_state.ensemble is not None:
             st.subheader("Real-time Processing")
             
             if st.button("🚀 Start Processing", type="primary"):
-                # Initialize results storage
                 results = []
                 total_rows = len(df)
                 
-                # Create containers for real-time updates
                 main_progress = st.progress(0)
                 status_container = st.empty()
                 metrics_container = st.container()
                 results_container = st.empty()
                 
-                # Metrics display
                 with metrics_container:
                     col_metrics = st.columns(4)
-                    processed_metric = col_metrics[0].metric("Processed", "0")
-                    remaining_metric = col_metrics[1].metric("Remaining", str(total_rows))
-                    rate_metric = col_metrics[2].metric("Rate (rows/sec)", "0")
-                    eta_metric = col_metrics[3].metric("ETA", "Calculating...")
+                    col_metrics[0].metric("Processed", "0")
+                    col_metrics[1].metric("Remaining", str(total_rows))
+                    col_metrics[2].metric("Rate (rows/sec)", "0")
+                    col_metrics[3].metric("ETA", "Calculating...")
                 
                 start_time = time.time()
                 
-                # Process in batches
                 for i in range(0, total_rows, batch_size):
                     batch_start = time.time()
                     batch_end = min(i + batch_size, total_rows)
                     batch_df = df.iloc[i:batch_end]
                     
-                    # Process batch
                     batch_results = []
                     for idx, row in batch_df.iterrows():
                         try:
                             final_result, model_predictions = st.session_state.ensemble.extract_with_voting(row['text'])
-                            
-                            # Create result row
                             result_row = {
                                 'original_index': idx,
                                 'text_preview': row['text'][:100] + '...' if len(row['text']) > 100 else row['text'],
                                 **final_result
                             }
-                            
                             if show_model_breakdown:
                                 result_row['model_breakdown'] = json.dumps(model_predictions)
-                            
                             batch_results.append(result_row)
-                            
                         except Exception as e:
-                            st.error(f"Error processing row {idx}: {str(e)}")
                             batch_results.append({
                                 'original_index': idx,
                                 'text_preview': row['text'][:100] + '...',
@@ -172,7 +151,7 @@ with col1:
                     
                     results.extend(batch_results)
                     
-                    # Update progress and metrics
+                    # Progress update
                     progress = batch_end / total_rows
                     main_progress.progress(progress)
                     
@@ -181,10 +160,8 @@ with col1:
                     remaining_rows = total_rows - batch_end
                     eta_seconds = remaining_rows / processing_rate if processing_rate > 0 else 0
                     
-                    # Update metrics
                     status_container.info(f"Processing batch {i//batch_size + 1}/{(total_rows-1)//batch_size + 1}")
                     
-                    # Update metric displays (you'd need to recreate these)
                     with metrics_container:
                         col_metrics = st.columns(4)
                         col_metrics[0].metric("Processed", f"{batch_end:,}")
@@ -192,15 +169,12 @@ with col1:
                         col_metrics[2].metric("Rate (rows/sec)", f"{processing_rate:.1f}")
                         col_metrics[3].metric("ETA", f"{eta_seconds/60:.1f} min" if eta_seconds > 60 else f"{eta_seconds:.0f} sec")
                     
-                    # Show intermediate results
                     if show_intermediate and results:
                         current_results_df = pd.DataFrame(results)
                         results_container.dataframe(current_results_df.tail(50), use_container_width=True)
                     
-                    # Small delay to make progress visible
                     time.sleep(0.1)
                 
-                # Final results
                 st.session_state.results_df = pd.DataFrame(results)
                 st.success(f"✅ Processing completed! Extracted data from {total_rows} rows in {elapsed_time:.1f} seconds")
 
@@ -209,38 +183,29 @@ with col2:
     
     if st.session_state.results_df is not None:
         df_results = st.session_state.results_df
-        
-        # Summary statistics
         st.metric("Total Rows Processed", len(df_results))
         
-        # Show field extraction success rates
         if len(df_results) > 0:
             st.subheader("Field Extraction Success")
-            
-            # Count non-null extractions for each field
             field_counts = {}
             for col in df_results.columns:
                 if col not in ['original_index', 'text_preview', 'error', 'model_breakdown']:
                     non_null_count = df_results[col].notna().sum()
                     success_rate = (non_null_count / len(df_results)) * 100
                     field_counts[col] = success_rate
-            
-            # Display as metrics
             for field, rate in field_counts.items():
                 st.metric(f"{field.title()} Success", f"{rate:.1f}%")
 
-# Results download section
+# --- Download results ---
 if st.session_state.results_df is not None:
     st.header("📥 Download Results")
     
     col_download1, col_download2 = st.columns(2)
     
     with col_download1:
-        # CSV download
         csv_buffer = io.StringIO()
         st.session_state.results_df.to_csv(csv_buffer, index=False)
         csv_data = csv_buffer.getvalue()
-        
         st.download_button(
             label="📊 Download as CSV",
             data=csv_data,
@@ -249,9 +214,7 @@ if st.session_state.results_df is not None:
         )
     
     with col_download2:
-        # JSON download
         json_data = st.session_state.results_df.to_json(orient='records', indent=2)
-        
         st.download_button(
             label="📋 Download as JSON",
             data=json_data,
@@ -259,6 +222,6 @@ if st.session_state.results_df is not None:
             mime="application/json"
         )
 
-# Footer
+# --- Footer ---
 st.markdown("---")
 st.markdown("Built with Streamlit 🎈 | Multi-Model Ensemble Entity Extraction")

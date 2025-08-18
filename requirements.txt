@@ -12,3 +12,4 @@ plotly>=5.10.0
 seaborn>=0.11.2
 matplotlib>=3.5.0
 python-dateutil>=2.8.0
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
