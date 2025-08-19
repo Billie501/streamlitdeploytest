@@ -1,19 +1,19 @@
 --only-binary=:all:
 
 # Core
-streamlit==1.48.1
+streamlit
 pandas
 
-# spaCy with wheels (avoid building blis/thinc from source)
-spacy==3.7.2
-srsly<3.0.0,>=2.4.3
-thinc<9.0.0,>=8.1.0
-blis<1.0.0,>=0.7.9
+# spaCy + dependencies
+spacy==3.8.7
+srsly<4.0.0,>=2.4.3
+thinc<10.0.0,>=9.0.0
+blis<2.0.0,>=0.7.9
 catalogue<3.0.0,>=2.0.6
-murmurhash<1.1.0,>=0.28.0
+murmurhash<1.2.0,>=1.0.2
 preshed<4.0.0,>=3.0.2
 cymem<3.0.0,>=2.0.2
-numpy<2.0.0
+numpy<3.0.0
 
-# spaCy model (small English)
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
+# spaCy model (English small, latest)
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
