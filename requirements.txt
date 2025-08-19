@@ -1,8 +1,8 @@
---prefer-binary
+--only-binary=:all:
 
 # Core
 streamlit==1.48.1
-pandas==2.2.2
+pandas
 
 # spaCy with wheels (avoid building blis/thinc from source)
 spacy==3.7.2
