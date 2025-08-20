@@ -1,13 +1,10 @@
---only-binary=:all:
-
-# Core
+# Core dependencies
 streamlit
 pandas
 
-# spaCy + English model
-spacy==3.8.7
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
-
-# Optional
+# spaCy with compatible versions
+spacy>=3.7,<3.8
 numpy>=1.23,<2.0
 
+# spaCy model - use https URL format for Streamlit deployment
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
