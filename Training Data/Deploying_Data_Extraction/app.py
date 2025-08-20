@@ -17,35 +17,45 @@ from extractors import EnsembleVotingExtractor
 def load_spacy_model():
     """
     Loads the spaCy model. Downloads it if not available.
-    More robust error handling for Streamlit Cloud.
+    Compatible with spaCy 3.8.7
     """
     try:
         import spacy
         return spacy.load("en_core_web_sm")
-    except (OSError, ImportError) as e:
-        st.info("🔄 Setting up spaCy model for first use...")
+    except OSError:
+        st.info("🔄 Downloading spaCy model for first use...")
         
         try:
-            # Try direct spacy download first
             import subprocess
             import sys
             
             with st.spinner("Downloading spaCy model 'en_core_web_sm'..."):
+                # Use spaCy's download command
                 result = subprocess.run([
-                    sys.executable, "-m", "spacy", "download", "en_core_web_sm"
+                    sys.executable, "-m", "spacy", "download", "en_core_web_sm", "--quiet"
                 ], capture_output=True, text=True, timeout=300)
                 
                 if result.returncode == 0:
                     import spacy
                     return spacy.load("en_core_web_sm")
                 else:
-                    st.error(f"Failed to download spaCy model: {result.stderr}")
+                    # Fallback: try installing directly via pip
+                    st.warning("Direct download failed, trying alternative method...")
+                    pip_result = subprocess.run([
+                        sys.executable, "-m", "pip", "install", 
+                        "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+                    ], capture_output=True, text=True, timeout=300)
                     
-        except Exception as download_error:
-            st.error(f"Error downloading spaCy model: {str(download_error)}")
-            
-            # Fallback: suggest manual installation
-            st.code("pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.4.1/en_core_web_sm-3.4.1-py3-none-any.whl")
+                    if pip_result.returncode == 0:
+                        import spacy
+                        return spacy.load("en_core_web_sm")
+                    else:
+                        st.error(f"Failed to install spaCy model: {pip_result.stderr}")
+                        st.stop()
+                        
+        except Exception as e:
+            st.error(f"Error setting up spaCy model: {str(e)}")
+            st.info("Please try restarting the app or contact support.")
             st.stop()
     
     except Exception as e:
