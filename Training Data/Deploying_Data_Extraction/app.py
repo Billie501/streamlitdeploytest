@@ -17,14 +17,40 @@ from extractors import EnsembleVotingExtractor
 def load_spacy_model():
     """
     Loads the spaCy model. Downloads it if not available.
-    Cached so it only runs once per session.
+    More robust error handling for Streamlit Cloud.
     """
     try:
+        import spacy
         return spacy.load("en_core_web_sm")
-    except OSError:
-        with st.spinner("Downloading spaCy model 'en_core_web_sm'..."):
-            spacy.cli.download("en_core_web_sm")
-        return spacy.load("en_core_web_sm")
+    except (OSError, ImportError) as e:
+        st.info("🔄 Setting up spaCy model for first use...")
+        
+        try:
+            # Try direct spacy download first
+            import subprocess
+            import sys
+            
+            with st.spinner("Downloading spaCy model 'en_core_web_sm'..."):
+                result = subprocess.run([
+                    sys.executable, "-m", "spacy", "download", "en_core_web_sm"
+                ], capture_output=True, text=True, timeout=300)
+                
+                if result.returncode == 0:
+                    import spacy
+                    return spacy.load("en_core_web_sm")
+                else:
+                    st.error(f"Failed to download spaCy model: {result.stderr}")
+                    
+        except Exception as download_error:
+            st.error(f"Error downloading spaCy model: {str(download_error)}")
+            
+            # Fallback: suggest manual installation
+            st.code("pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.4.1/en_core_web_sm-3.4.1-py3-none-any.whl")
+            st.stop()
+    
+    except Exception as e:
+        st.error(f"Unexpected error loading spaCy: {str(e)}")
+        st.stop()
 
 nlp = load_spacy_model()
 

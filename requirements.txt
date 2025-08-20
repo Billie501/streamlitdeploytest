@@ -1,10 +1,33 @@
-# Core dependencies
-streamlit
-pandas
+# Force binary wheels only to avoid compilation issues
+--only-binary=:all:
 
-# spaCy with compatible versions
-spacy>=3.7,<3.8
-numpy>=1.23,<2.0
+# Core Streamlit dependencies
+streamlit>=1.28.0
+pandas>=1.5.0
 
-# spaCy model - use https URL format for Streamlit deployment
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+# SpaCy with stable version that has good wheel support
+spacy==3.4.4
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.4.1/en_core_web_sm-3.4.1-py3-none-any.whl
+
+# Common ML libraries your ensemble likely needs
+scikit-learn>=1.0.0
+numpy>=1.21.0,<1.25.0
+scipy>=1.7.0
+
+# Text processing utilities
+nltk>=3.7
+textblob>=0.17.0
+
+# For pattern matching and regex (often used in extractors)
+regex>=2022.1.18
+
+# JSON handling and data processing
+jsonschema>=4.0.0
+
+# For any transformers/huggingface models (if used)
+transformers>=4.20.0
+torch>=1.12.0,<2.0.0 --index-url https://download.pytorch.org/whl/cpu
+
+# Utilities that ensemble extractors commonly use
+python-dateutil>=2.8.0
+pytz>=2022.1
