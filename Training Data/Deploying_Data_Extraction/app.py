@@ -16,51 +16,34 @@ from extractors import EnsembleVotingExtractor
 @st.cache_resource
 def load_spacy_model():
     """
-    Loads the spaCy model. Downloads it if not available.
-    Compatible with spaCy 3.8.7
+    Loads the spaCy model with fallback to blank model if download fails.
+    Compatible with Streamlit Cloud restrictions.
     """
+    import spacy
+    
     try:
-        import spacy
+        # Try to load the model
         return spacy.load("en_core_web_sm")
     except OSError:
-        st.info("🔄 Downloading spaCy model for first use...")
+        # Model not found, try to create a blank model with some basic NLP capabilities
+        st.warning("⚠️ spaCy model 'en_core_web_sm' not available. Using basic English model.")
+        st.info("For full functionality, include the model in requirements.txt at build time.")
         
         try:
-            import subprocess
-            import sys
+            # Create a blank English model
+            nlp = spacy.blank("en")
             
-            with st.spinner("Downloading spaCy model 'en_core_web_sm'..."):
-                # Use spaCy's download command
-                result = subprocess.run([
-                    sys.executable, "-m", "spacy", "download", "en_core_web_sm", "--quiet"
-                ], capture_output=True, text=True, timeout=300)
-                
-                if result.returncode == 0:
-                    import spacy
-                    return spacy.load("en_core_web_sm")
-                else:
-                    # Fallback: try installing directly via pip
-                    st.warning("Direct download failed, trying alternative method...")
-                    pip_result = subprocess.run([
-                        sys.executable, "-m", "pip", "install", 
-                        "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-                    ], capture_output=True, text=True, timeout=300)
-                    
-                    if pip_result.returncode == 0:
-                        import spacy
-                        return spacy.load("en_core_web_sm")
-                    else:
-                        st.error(f"Failed to install spaCy model: {pip_result.stderr}")
-                        st.stop()
-                        
+            # Add basic pipeline components that don't require training
+            if "sentencizer" not in nlp.pipe_names:
+                nlp.add_pipe("sentencizer")
+            
+            return nlp
+            
         except Exception as e:
-            st.error(f"Error setting up spaCy model: {str(e)}")
-            st.info("Please try restarting the app or contact support.")
-            st.stop()
-    
-    except Exception as e:
-        st.error(f"Unexpected error loading spaCy: {str(e)}")
-        st.stop()
+            st.error(f"Failed to create fallback model: {str(e)}")
+            st.info("The app will continue with limited NLP functionality.")
+            # Return a very basic blank model
+            return spacy.blank("en")
 
 nlp = load_spacy_model()
 
