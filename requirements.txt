@@ -1,19 +1,13 @@
+
 --only-binary=:all:
 
 # Core
 streamlit
 pandas
 
-# spaCy + dependencies
-spacy==3.7
-srsly<4.0.0,>=2.4.3
-thinc<10.0.0,>=9.0.0
-blis<2.0.0,>=0.7.9
-catalogue<3.0.0,>=2.0.6
-murmurhash<1.2.0,>=1.0.2
-preshed<4.0.0,>=3.0.2
-cymem<3.0.0,>=2.0.2
-numpy<3.0.0
-
-# spaCy model (English small, latest)
+# spaCy + English model
+spacy==3.8.7
 en-core-web-sm==3.8.0
+
+# Optional: numpy (some platforms need explicit pinning)
+numpy>=1.23,<2.0
