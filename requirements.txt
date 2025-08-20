@@ -5,7 +5,7 @@ streamlit
 pandas
 
 # spaCy + dependencies
-spacy==3.8.7
+spacy==3.7
 srsly<4.0.0,>=2.4.3
 thinc<10.0.0,>=9.0.0
 blis<2.0.0,>=0.7.9
@@ -16,4 +16,4 @@ cymem<3.0.0,>=2.0.2
 numpy<3.0.0
 
 # spaCy model (English small, latest)
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz
+en-core-web-sm==3.8.0
