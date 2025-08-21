@@ -234,32 +234,119 @@ with col2:
 # =========================
 # Download Results
 # =========================
+# Replace your download results section with this:
+
 if st.session_state.results_df is not None:
     st.header("📥 Download Results")
 
-    col_dl1, col_dl2 = st.columns(2)
-
+    # Define the exact column mapping you want
+    desired_columns = [
+        'reporter_name', 'person_involved', 'incident_date', 'incident_time',
+        'department', 'incident_description', 'location', 'label',
+        'was_injured', 'injury_description'
+    ]
+    
+    # Create mapping from your current columns to desired headers
+    # You'll need to adjust the keys based on what your extractor actually produces
+    column_mapping = {
+        # Map your current column names to the desired ones
+        # Example mappings (adjust these based on your actual column names):
+        'name': 'reporter_name',
+        'person': 'person_involved', 
+        'date': 'incident_date',
+        'time': 'incident_time',
+        'dept': 'department',
+        'description': 'incident_description',
+        'loc': 'location',
+        'category': 'label',
+        'injured': 'was_injured',
+        'injury': 'injury_description'
+        # Add more mappings as needed
+    }
+    
+    # Debug: Show current vs desired columns
+    with st.expander("🔍 Column Mapping Debug", expanded=False):
+        st.write("**Current columns in results:**")
+        current_cols = [col for col in st.session_state.results_df.columns 
+                       if col not in ["original_index", "text_preview", "error", "model_breakdown"]]
+        st.write(current_cols)
+        
+        st.write("**Desired columns:**")
+        st.write(desired_columns)
+        
+        st.write("**Current mapping:**")
+        st.write(column_mapping)
+    
+    # Create the download DataFrame with proper column names
+    download_df = pd.DataFrame()
+    
+    # Initialize all desired columns with empty values
+    for col in desired_columns:
+        download_df[col] = ""
+    
+    # Map existing data to the desired columns
+    for old_col, new_col in column_mapping.items():
+        if old_col in st.session_state.results_df.columns and new_col in desired_columns:
+            download_df[new_col] = st.session_state.results_df[old_col].fillna("")
+    
+    # Fill any unmapped columns with data from results if column names match exactly
+    for col in desired_columns:
+        if col in st.session_state.results_df.columns and download_df[col].eq("").all():
+            download_df[col] = st.session_state.results_df[col].fillna("")
+    
+    # Show preview
+    st.subheader("Preview of Structured Download Data:")
+    st.dataframe(download_df.head(), use_container_width=True)
+    st.info(f"📊 Download will contain {len(download_df)} rows with standardized column headers")
+    
+    # Download options
+    col_dl1, col_dl2, col_dl3 = st.columns(3)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
     with col_dl1:
         csv_buffer = io.StringIO()
-        st.session_state.results_df.to_csv(csv_buffer, index=False)
+        download_df.to_csv(csv_buffer, index=False)
         st.download_button(
-            label="📊 Download as CSV",
+            label="📊 Download Structured CSV",
             data=csv_buffer.getvalue(),
-            file_name=f"extracted_data_{datetime.now():%Y%m%d_%H%M%S}.csv",
-            mime="text/csv"
+            file_name=f"incident_report_data_{timestamp}.csv",
+            mime="text/csv",
+            help="CSV with standardized column headers"
         )
-
+    
     with col_dl2:
-        json_data = st.session_state.results_df.to_json(orient="records", indent=2)
+        # Excel version
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            download_df.to_excel(writer, index=False, sheet_name='Incident_Reports')
+        st.download_button(
+            label="📈 Download as Excel",
+            data=excel_buffer.getvalue(),
+            file_name=f"incident_report_data_{timestamp}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with col_dl3:
+        json_data = download_df.to_json(orient="records", indent=2)
         st.download_button(
             label="📋 Download as JSON",
             data=json_data,
-            file_name=f"extracted_data_{datetime.now():%Y%m%d_%H%M%S}.json",
+            file_name=f"incident_report_data_{timestamp}.json",
             mime="application/json"
         )
+    
+    # Show extraction success rates
+    st.subheader("📈 Field Extraction Success:")
+    cols = st.columns(5)
+    for i, col in enumerate(desired_columns):
+        with cols[i % 5]:
+            non_empty = download_df[col].ne("").sum()
+            success_rate = (non_empty / len(download_df)) * 100 if len(download_df) > 0 else 0
+            st.metric(f"{col.replace('_', ' ').title()}", f"{success_rate:.1f}%")
 
 # =========================
 # Footer
 # =========================
 st.markdown("---")
-st.markdown("Built with Streamlit 🎈 | Multi-Model Ensemble Entity Extraction")
+st.markdown("Built by 2025 SWSR Team | Multi-Model Ensemble Entity Extraction")
