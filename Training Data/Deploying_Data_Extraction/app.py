@@ -66,11 +66,91 @@ if "is_trained" not in st.session_state:
 if "results_df" not in st.session_state:
     st.session_state.results_df = None
 
+# Add this diagnostic section to your app.py to identify the root cause
+
+def diagnose_model_performance():
+    """Diagnostic function to identify why accuracy is poor on Streamlit"""
+    
+    st.header("🔍 Model Performance Diagnostics")
+    
+    # Check 1: SpaCy Model Version and Components
+    if st.button("Check spaCy Model Status"):
+        nlp = load_spacy_model()
+        
+        st.subheader("SpaCy Model Information:")
+        st.write(f"**Model Name:** {nlp.meta.get('name', 'Unknown')}")
+        st.write(f"**Model Version:** {nlp.meta.get('version', 'Unknown')}")
+        st.write(f"**Language:** {nlp.meta.get('lang', 'Unknown')}")
+        st.write(f"**Pipeline Components:** {nlp.pipe_names}")
+        
+        # Check if it's a blank model (which would explain poor performance)
+        if not nlp.pipe_names or 'ner' not in nlp.pipe_names:
+            st.error("⚠️ ISSUE FOUND: Using blank spaCy model without NER component!")
+            st.info("This explains the poor accuracy. The model has no trained NER capabilities.")
+        
+        # Test the model on a simple example
+        st.subheader("Model Test:")
+        test_text = "John Smith works at Microsoft in Seattle and was injured on January 15, 2024."
+        doc = nlp(test_text)
+        
+        st.write(f"**Test Text:** {test_text}")
+        st.write(f"**Entities Found:** {[(ent.text, ent.label_) for ent in doc.ents]}")
+        
+        if not doc.ents:
+            st.error("⚠️ ISSUE FOUND: spaCy model is not extracting any entities from test text!")
+    
+    # Check 2: Compare Environment Differences
+    st.subheader("Environment Comparison:")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Google Colab (High Accuracy):**")
+        st.write("- Full spaCy model with all components")
+        st.write("- More memory and processing power")
+        st.write("- Stable file system for model loading")
+        st.write("- Likely using spaCy 3.4+ with full NER")
+    
+    with col2:
+        st.write("**Streamlit Cloud (Poor Accuracy):**")
+        st.write("- Potentially blank/limited spaCy model")
+        st.write("- Memory/CPU constraints")
+        st.write("- Permission restrictions")
+        st.write("- May be missing trained model components")
+    
+    # Check 3: Test Your Ensemble Components
+    if st.session_state.ensemble:
+        st.subheader("Ensemble Component Test:")
+        test_text = st.text_area("Enter test text:", value="John Smith reported an incident at the warehouse on March 15th at 2:30 PM.")
+        
+        if st.button("Test Ensemble"):
+            try:
+                result, breakdown = st.session_state.ensemble.extract_with_voting(test_text)
+                st.write("**Extraction Result:**")
+                st.json(result)
+                st.write("**Model Breakdown:**")
+                st.json(breakdown)
+                
+                # Check if results are mostly empty
+                non_empty_fields = sum(1 for v in result.values() if v and str(v).strip())
+                total_fields = len(result)
+                accuracy_estimate = (non_empty_fields / total_fields) * 100 if total_fields > 0 else 0
+                
+                if accuracy_estimate < 30:
+                    st.error(f"⚠️ ISSUE FOUND: Only {accuracy_estimate:.1f}% of fields extracted!")
+                    st.info("This suggests the underlying models are not working properly.")
+                
+            except Exception as e:
+                st.error(f"⚠️ ISSUE FOUND: Ensemble extraction failed: {str(e)}")
+
+  
+
 # =========================
 # Header
 # =========================
 st.title("🤖 Real-time ML Entity Extraction Pipeline")
 st.markdown("Multi-Model Ensemble with Voting for unstructured data classification")
+
+diagnose_model_performance()  
 
 # =========================
 # Sidebar Controls
