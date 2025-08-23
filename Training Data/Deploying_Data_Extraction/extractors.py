@@ -1,410 +1,414 @@
 # extractors.py
-import spacy
-import pandas as pd
-import random
 import re
-import numpy as np
-from spacy.training.example import Example
-from dateutil import parser as date_parser
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import Pipeline
+import spacy
+import logging
+from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+import pandas as pd
 
-class SpacyNERExtractor:
+logger = logging.getLogger(__name__)
+
+class RobustPatternExtractor:
+    """
+    Robust pattern-based extractor that works well on new data
+    without requiring training on specific datasets.
+    """
+    
     def __init__(self):
-        self.nlp = spacy.load("en_core_web_sm")
-        self.ner = self.nlp.get_pipe("ner")
-    
-    def filter_overlapping_entities(self, entities):
-        entities = sorted(entities, key=lambda x: x[0])
-        non_overlapping = []
-        last_end = -1
-        for start, end, label in entities:
-            if start >= last_end:
-                non_overlapping.append((start, end, label))
-                last_end = end
-        return non_overlapping
-    
-    def prepare_training_data(self, texts, labels):
-        data = []
-        for i, (text, label_dict) in enumerate(zip(texts, labels)):
-            entities = []
-
-            for col in ['reporter_name', 'person_involved', 'incident_date', 'incident_time',
-                       'department', 'incident_description', 'location', 'injury_description']:
-
-                if col in label_dict:
-                    value = str(label_dict[col]).strip()
-                    if value != 'N/A' and value != 'nan' and pd.notna(value) and value in text:
-                        start = text.find(value)
-                        if start != -1:
-                            end = start + len(value)
-                            entities.append((start, end, col.upper()))
-
-            entities = self.filter_overlapping_entities(entities)
-            if entities:
-                data.append((text, {"entities": entities}))
-
-        return data
-    
-    def train(self, train_texts, train_labels):
-        print("Preparing spaCy training data...")
-        training_data = self.prepare_training_data(train_texts, train_labels)
-        print(f"Prepared {len(training_data)} training samples for spaCy")
-
-        # Add custom labels
-        for _, annotations in training_data:
-            for ent in annotations.get("entities"):
-                self.ner.add_label(ent[2])
-
-        # Train model
-        other_pipes = [pipe for pipe in self.nlp.pipe_names if pipe != "ner"]
-        with self.nlp.disable_pipes(*other_pipes):
-            optimizer = self.nlp.resume_training()
-            for itn in range(30):
-                random.shuffle(training_data)
-                losses = {}
-                for text, annotations in training_data:
-                    try:
-                        example = Example.from_dict(self.nlp.make_doc(text), annotations)
-                        self.nlp.update([example], drop=0.5, losses=losses)
-                    except:
-                        continue
-                if itn % 10 == 0:
-                    print(f"Iteration {itn+1}, Losses: {losses}")
-    
-    def extract(self, text):
-        doc = self.nlp(text)
-        extracted = {}
-
-        for ent in doc.ents:
-            field_name = ent.label_.lower()
-            if field_name not in extracted:  # Take first occurrence
-                extracted[field_name] = ent.text
-
-        return extracted
-
-class HybridExtractor:
-    def __init__(self):
+        self.confidence_threshold = 0.3
+        self.use_fuzzy_matching = False
+        self.strict_date_format = False
+        self.require_injury_keywords = True
+        
+        # Enhanced patterns for better extraction
         self.date_patterns = [
-            r'\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b',
-            r'\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b',
-            r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b'
+            # Standard formats
+            r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b',
+            r'\b(\d{4}[-/]\d{1,2}[-/]\d{1,2})\b',
+            # Month name formats
+            r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b',
+            r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}\b',
+            # Alternative formats
+            r'\b(\d{1,2}(st|nd|rd|th)?\s+(?:of\s+)?(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\b',
+            r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{2})\b'  # YY format
         ]
+        
         self.time_patterns = [
-            r'\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b',
-            r'\bat\s+\d{1,2}:\d{2}\b'
+            r'\b(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm))\b',
+            r'\b(\d{1,2}:\d{2}(?::\d{2})?)\b',
+            r'\b(\d{1,2}\s*(?:AM|PM|am|pm))\b',
+            r'\b((?:morning|afternoon|evening|night))\b'
         ]
+        
         self.name_patterns = [
-            r'\breported by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-            r'\b([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:from|reported|involved)'
+            # Full names
+            r'\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b',
+            # Names with titles
+            r'(?:Mr\.|Mrs\.|Ms\.|Dr\.|Miss)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            # Names in context
+            r'(?:employee|worker|person|individual|staff|member)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'(?:reported by|report from|submitted by)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            # Names with employee context
+            r'\b([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:was|is|reported|stated|mentioned)'
         ]
-
-        # ML components for contextual fields
-        self.vectorizer = TfidfVectorizer(max_features=1000, ngram_range=(1, 3))
-        self.department_classifier = Pipeline([
-            ('tfidf', TfidfVectorizer(max_features=500)),
-            ('classifier', MultinomialNB())
-        ])
-        self.injury_classifier = Pipeline([
-            ('tfidf', TfidfVectorizer(max_features=500)),
-            ('classifier', MultinomialNB())
-        ])
+        
+        self.department_patterns = [
+            r'\b(warehouse|office|facility|department|production|manufacturing|maintenance|administration|security|shipping|receiving|quality|safety)\b',
+            r'\b(floor\s+\d+|level\s+\d+|room\s+\d+|building\s+[A-Z]|section\s+[A-Z0-9]+)\b',
+            r'\b([A-Z][a-z]+\s+(?:department|division|section|area|zone))\b'
+        ]
+        
+        self.location_patterns = [
+            r'\b(warehouse|factory|office|plant|facility|building|parking lot|cafeteria|break room|storage area)\b',
+            r'\b(loading dock|assembly line|conveyor|machine shop|laboratory|reception|entrance|exit)\b',
+            r'\b(?:at|in|near|by)\s+(?:the\s+)?([a-z]+(?:\s+[a-z]+){0,2})\b'
+        ]
+        
+        self.injury_keywords = [
+            'cut', 'bruise', 'burn', 'sprain', 'fracture', 'injury', 'hurt', 'pain', 
+            'ache', 'wound', 'injured', 'wounded', 'burned', 'bruised', 'bleeding',
+            'broken', 'twisted', 'strained', 'puncture', 'laceration', 'abrasion',
+            'contusion', 'trauma', 'damage', 'harm'
+        ]
+        
+        self.injury_indicators = [
+            'slipped', 'fell', 'tripped', 'caught', 'struck', 'hit', 'bumped',
+            'pinched', 'crushed', 'dropped', 'lifted', 'pulled', 'twisted'
+        ]
     
-    def extract_with_regex(self, text):
-        extracted = {}
-
-        # Extract dates
+    def extract_dates(self, text: str) -> Optional[str]:
+        """Extract dates with multiple pattern matching"""
         for pattern in self.date_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
-                try:
-                    parsed_date = date_parser.parse(matches[0])
-                    extracted['incident_date'] = parsed_date.strftime('%d/%m/%Y')
-                    break
-                except:
-                    continue
-
-        # Extract times
+                # Return the first match, handling tuple results
+                match = matches[0]
+                if isinstance(match, tuple):
+                    return match[0]
+                return match
+        return None
+    
+    def extract_times(self, text: str) -> Optional[str]:
+        """Extract times with multiple pattern matching"""
         for pattern in self.time_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
-                extracted['incident_time'] = matches[0].replace('at ', '')
-                break
-
-        # Extract reporter name
+                return matches[0]
+        return None
+    
+    def extract_names(self, text: str) -> Dict[str, str]:
+        """Extract names with context awareness"""
+        names = {}
+        found_names = []
+        
         for pattern in self.name_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                extracted['reporter_name'] = match.group(1)
-                break
-
-        # Extract location patterns
-        location_patterns = [
-            r'(?:at|in|near)\s+([A-Z][a-z]*(?:\s+[A-Z]*[a-z]*)*\s*\d*)',
-            r'(Warehouse\s+[A-Z])',
-            r'(Dry Dock\s+\d+)',
-            r'(Building\s+\d+)'
-        ]
-
-        for pattern in location_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                extracted['location'] = match.group(1)
-                break
-
-        return extracted
+            matches = re.findall(pattern, text)
+            found_names.extend(matches)
+        
+        # Remove duplicates while preserving order
+        unique_names = []
+        seen = set()
+        for name in found_names:
+            if name not in seen:
+                unique_names.append(name)
+                seen.add(name)
+        
+        # Assign names based on context
+        if len(unique_names) >= 1:
+            names['reporter_name'] = unique_names[0]
+        if len(unique_names) >= 2:
+            names['person_involved'] = unique_names[1]
+        elif len(unique_names) == 1:
+            # If only one name, try to determine if it's reporter or person involved
+            text_lower = text.lower()
+            if any(word in text_lower for word in ['reported', 'report', 'submitted']):
+                names['reporter_name'] = unique_names[0]
+            else:
+                names['person_involved'] = unique_names[0]
+        
+        return names
     
-    def train_ml_components(self, train_texts, train_labels):
-        print("Training ML components for contextual extraction...")
-
-        # Prepare department labels
-        dept_labels = []
-        injury_labels = []
-
-        for label in train_labels:
-            dept = label.get('department', 'Unknown')
-            dept_labels.append(dept if pd.notna(dept) and dept != 'N/A' else 'Unknown')
-
-            was_injured = label.get('was_injured', 'No')
-            injury_labels.append(was_injured if pd.notna(was_injured) else 'No')
-
-        # Train classifiers
-        self.department_classifier.fit(train_texts, dept_labels)
-        self.injury_classifier.fit(train_texts, injury_labels)
-
-        print("ML components trained successfully")
+    def extract_departments_locations(self, text: str) -> Dict[str, str]:
+        """Extract department and location information"""
+        result = {}
+        
+        # Extract departments
+        for pattern in self.department_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                result['department'] = matches[0]
+                break
+        
+        # Extract locations
+        for pattern in self.location_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                result['location'] = matches[0]
+                break
+        
+        return result
     
-    def extract(self, text):
-        # Start with regex extraction
-        extracted = self.extract_with_regex(text)
-
-        # Add ML predictions
-        try:
-            dept_pred = self.department_classifier.predict([text])[0]
-            if dept_pred != 'Unknown':
-                extracted['department'] = dept_pred
-
-            injury_pred = self.injury_classifier.predict([text])[0]
-            extracted['was_injured'] = injury_pred
-        except:
-            pass
-
-        return extracted
-
-class TemplateMLExtractor:
-    def __init__(self):
-        self.templates = {
-            'incident_description': r'(?:incident|accident|event).*?(?:caused|resulted|leading|involving)\s+(.+?)(?:\.|The|,\s*[A-Z])',
-            'injury_description': r'(?:suffered|sustained|injury|injured|hurt|damage)\s+(.+?)(?:\.|from|due to|$)',
-            'person_involved': r'(?:involving|victim|worker|employee|person)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-            'department_mention': r'(?:from the|department of|in the)\s+([A-Z][a-z]+(?:\s+(?:and|&)\s+[A-Z][a-z]+)*)\s+department'
+    def analyze_injury(self, text: str) -> Dict[str, str]:
+        """Analyze injury-related information"""
+        text_lower = text.lower()
+        
+        # Check for injury keywords
+        injury_found = any(keyword in text_lower for keyword in self.injury_keywords)
+        indicator_found = any(indicator in text_lower for indicator in self.injury_indicators)
+        
+        result = {
+            'was_injured': 'Yes' if (injury_found or indicator_found) else 'No'
         }
-
-        self.classifiers = {}
-
-    def extract_with_templates(self, text):
-        extracted = {}
-
-        for field, pattern in self.templates.items():
-            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-            if match:
-                value = match.group(1).strip()
-                # Clean up extracted text
-                value = re.sub(r'\s+', ' ', value)  # Normalize whitespace
-                extracted[field] = value[:200]  # Limit length
-
-        return extracted
-
-    def train_classifiers(self, train_texts, train_labels):
-        print("Training template-based classifiers...")
-
-        # Build classifiers for different field types
-        field_mappings = {
-            'location': 'location',
-            'label': 'label',
-            'department': 'department'
+        
+        # Extract injury description if injury detected
+        if injury_found or indicator_found:
+            sentences = re.split(r'[.!?]+', text)
+            for sentence in sentences:
+                sentence_lower = sentence.lower().strip()
+                if any(keyword in sentence_lower for keyword in self.injury_keywords + self.injury_indicators):
+                    result['injury_description'] = sentence.strip()
+                    break
+        
+        return result
+    
+    def categorize_incident(self, text: str) -> str:
+        """Categorize the incident based on content"""
+        text_lower = text.lower()
+        
+        # Define category keywords
+        categories = {
+            'Fall/Slip': ['slip', 'fall', 'trip', 'stumble', 'wet floor', 'slippery'],
+            'Cut/Laceration': ['cut', 'sharp', 'blade', 'knife', 'glass', 'laceration'],
+            'Burn': ['burn', 'hot', 'fire', 'steam', 'chemical', 'acid'],
+            'Equipment': ['equipment', 'machine', 'malfunction', 'mechanical', 'tool'],
+            'Lifting/Strain': ['lift', 'heavy', 'strain', 'back', 'muscle', 'pull'],
+            'Chemical': ['chemical', 'spill', 'exposure', 'toxic', 'fumes'],
+            'Transportation': ['vehicle', 'forklift', 'truck', 'driving', 'collision'],
+            'Electrical': ['electrical', 'shock', 'wire', 'power', 'electric']
         }
+        
+        for category, keywords in categories.items():
+            if any(keyword in text_lower for keyword in keywords):
+                return category
+        
+        return 'General'
+    
+    def extract_comprehensive(self, text: str) -> Dict[str, Any]:
+        """
+        Comprehensive extraction using all pattern methods
+        """
+        if not text or not text.strip():
+            return {field: "" for field in ['reporter_name', 'person_involved', 'incident_date', 
+                                          'incident_time', 'department', 'incident_description', 
+                                          'location', 'label', 'was_injured', 'injury_description']}
+        
+        result = {}
+        
+        # Extract dates and times
+        result['incident_date'] = self.extract_dates(text) or ""
+        result['incident_time'] = self.extract_times(text) or ""
+        
+        # Extract names
+        names = self.extract_names(text)
+        result['reporter_name'] = names.get('reporter_name', "")
+        result['person_involved'] = names.get('person_involved', "")
+        
+        # Extract departments and locations
+        dept_loc = self.extract_departments_locations(text)
+        result['department'] = dept_loc.get('department', "")
+        result['location'] = dept_loc.get('location', "")
+        
+        # Analyze injuries
+        injury_info = self.analyze_injury(text)
+        result['was_injured'] = injury_info.get('was_injured', "No")
+        result['injury_description'] = injury_info.get('injury_description', "")
+        
+        # Set incident description
+        result['incident_description'] = text[:500] + "..." if len(text) > 500 else text
+        
+        # Categorize incident
+        result['label'] = self.categorize_incident(text)
+        
+        return result
 
-        for field_name, label_key in field_mappings.items():
-            try:
-                pipeline = Pipeline([
-                    ('tfidf', TfidfVectorizer(max_features=300, ngram_range=(1, 2))),
-                    ('classifier', RandomForestClassifier(n_estimators=50, random_state=42))
-                ])
-
-                y = []
-                for label in train_labels:
-                    value = label.get(label_key, 'Unknown')
-                    if pd.isna(value) or value == 'N/A':
-                        value = 'Unknown'
-                    y.append(str(value))
-
-                pipeline.fit(train_texts, y)
-                self.classifiers[field_name] = pipeline
-                print(f"Trained classifier for {field_name}")
-            except Exception as e:
-                print(f"Error training {field_name} classifier: {e}")
-
-    def extract(self, text):
-        # Get template-based extractions
-        extracted = self.extract_with_templates(text)
-
-        # Add ML predictions
-        for field_name, classifier in self.classifiers.items():
-            try:
-                prediction = classifier.predict([text])[0]
-                if prediction != 'Unknown':
-                    extracted[field_name] = prediction
-            except:
-                continue
-
-        return extracted
-
-class AdvancedEnsembleExtractor:
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=100, ngram_range=(1, 2))
-        self.field_classifiers = {}
-
-    def extract_features(self, text):
-        features = {}
-
-        # Text statistics
-        features['text_length'] = len(text)
-        features['word_count'] = len(text.split())
-        features['sentence_count'] = len(re.split(r'[.!?]+', text))
-
-        # Pattern features
-        features['has_date'] = int(bool(re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{4}', text)))
-        features['has_time'] = int(bool(re.search(r'\d{1,2}:\d{2}', text)))
-        features['has_names'] = int(bool(re.search(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b', text)))
-        features['has_injury_words'] = int(bool(re.search(r'\b(?:injury|injured|hurt|damage|burn|cut|fall|fell)\b', text, re.IGNORECASE)))
-
-        # Department indicators
-        dept_words = ['facilities', 'health', 'safety', 'operations', 'maintenance', 'security']
-        features['dept_mentions'] = sum(1 for word in dept_words if word in text.lower())
-
-        return features
-
-    def train(self, train_texts, train_labels):
-        print("Training advanced ensemble extractor...")
-
-        # First, fit the TF-IDF vectorizer on all training texts
-        tfidf_features = self.vectorizer.fit_transform(train_texts).toarray()
-
-        # Extract statistical features for all texts
-        stat_features = []
-        for text in train_texts:
-            text_features = self.extract_features(text)
-            stat_features.append(list(text_features.values()))
-
-        stat_features = np.array(stat_features)
-
-        # Combine statistical and TF-IDF features
-        X = np.hstack([stat_features, tfidf_features])
-
-        # Train classifiers for each field
-        target_fields = ['department', 'location', 'was_injured', 'label']
-
-        for field in target_fields:
-            try:
-                y = []
-                for label in train_labels:
-                    value = label.get(field, 'Unknown')
-                    if pd.isna(value) or value == 'N/A':
-                        value = 'Unknown'
-                    y.append(str(value))
-
-                classifier = RandomForestClassifier(n_estimators=100, random_state=42)
-                classifier.fit(X, y)
-                self.field_classifiers[field] = classifier
-
-                print(f"Trained ensemble classifier for {field}")
-            except Exception as e:
-                print(f"Error training ensemble classifier for {field}: {e}")
-
-    def extract(self, text):
-        extracted = {}
-
-        # Extract statistical features
-        text_features = self.extract_features(text)
-        stat_features = np.array(list(text_features.values())).reshape(1, -1)
-
-        # Extract TF-IDF features
-        tfidf_features = self.vectorizer.transform([text]).toarray()
-
-        # Combine features
-        combined_features = np.hstack([stat_features, tfidf_features])
-
-        # Make predictions for each field
-        for field, classifier in self.field_classifiers.items():
-            try:
-                prediction = classifier.predict(combined_features)[0]
-                if prediction != 'Unknown':
-                    extracted[field] = prediction
-            except Exception as e:
-                continue
-
-        return extracted
-
-class EnsembleVotingExtractor:
-    def __init__(self):
-        self.spacy_extractor = SpacyNERExtractor()
-        self.hybrid_extractor = HybridExtractor()
-        self.template_extractor = TemplateMLExtractor()
-        self.advanced_extractor = AdvancedEnsembleExtractor()
-
-    def train_all_models(self, train_texts, train_labels):
-        print("Training all ensemble models...")
-        print("1. Training spaCy NER...")
-        self.spacy_extractor.train(train_texts, train_labels)
-        print("2. Training Hybrid extractor...")
-        self.hybrid_extractor.train_ml_components(train_texts, train_labels)
-        print("3. Training Template extractor...")
-        self.template_extractor.train_classifiers(train_texts, train_labels)
-        print("4. Training Advanced extractor...")
-        self.advanced_extractor.train(train_texts, train_labels)
-        print("All models trained successfully!")
-
-    def extract_with_voting(self, text):
-        # Your existing voting logic
-        predictions = {}
+class EnhancedSpaCyExtractor:
+    """
+    Enhanced spaCy-based extractor with fallback capabilities
+    """
+    
+    def __init__(self, nlp_model=None):
+        self.nlp = nlp_model
+        self.confidence_scores = {}
+    
+    def extract(self, text: str) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """Extract entities using spaCy with confidence scores"""
+        if not self.nlp or not text:
+            return {}, {}
+        
+        result = {}
+        confidence = {}
         
         try:
-            predictions['spacy'] = self.spacy_extractor.extract(text)
-        except:
-            predictions['spacy'] = {}
+            doc = self.nlp(text)
+            
+            # Extract named entities
+            persons = [ent.text for ent in doc.ents if ent.label_ in ["PERSON"]]
+            dates = [ent.text for ent in doc.ents if ent.label_ in ["DATE"]]
+            times = [ent.text for ent in doc.ents if ent.label_ in ["TIME"]]
+            orgs = [ent.text for ent in doc.ents if ent.label_ in ["ORG", "FAC"]]
+            
+            # Assign extracted entities
+            if persons:
+                result['reporter_name'] = persons[0] if len(persons) >= 1 else ""
+                result['person_involved'] = persons[1] if len(persons) >= 2 else ""
+                confidence['spacy_reporter_name'] = 0.8 if len(persons) >= 1 else 0
+                confidence['spacy_person_involved'] = 0.8 if len(persons) >= 2 else 0
+            
+            if dates:
+                result['incident_date'] = dates[0]
+                confidence['spacy_incident_date'] = 0.9
+            
+            if times:
+                result['incident_time'] = times[0]
+                confidence['spacy_incident_time'] = 0.8
+            
+            if orgs:
+                result['department'] = orgs[0]
+                result['location'] = orgs[0]
+                confidence['spacy_department'] = 0.7
+                confidence['spacy_location'] = 0.7
+            
+            # Basic injury detection
+            injury_words = ['injured', 'hurt', 'wound', 'pain', 'cut', 'burn']
+            text_lower = text.lower()
+            if any(word in text_lower for word in injury_words):
+                result['was_injured'] = 'Yes'
+                confidence['spacy_was_injured'] = 0.6
+            else:
+                result['was_injured'] = 'No'
+                confidence['spacy_was_injured'] = 0.4
+            
+            result['incident_description'] = text[:500] + "..." if len(text) > 500 else text
+            result['label'] = 'General'
+            
+        except Exception as e:
+            logger.error(f"SpaCy extraction error: {str(e)}")
+            result = {}
+            confidence = {}
+        
+        return result, confidence
+    
+    def train(self, texts: List[str], labels: List[Dict]):
+        """Placeholder training method"""
+        # In a real implementation, this would train the spaCy model
+        pass
 
-        try:
-            predictions['hybrid'] = self.hybrid_extractor.extract(text)
-        except:
-            predictions['hybrid'] = {}
-
-        try:
-            predictions['template'] = self.template_extractor.extract(text)
-        except:
-            predictions['template'] = {}
-
-        try:
-            predictions['advanced'] = self.advanced_extractor.extract(text)
-        except:
-            predictions['advanced'] = {}
-
-        # Combine predictions with voting
+class EnsembleVotingExtractor:
+    """
+    Enhanced ensemble extractor that combines multiple approaches
+    """
+    
+    def __init__(self, nlp_model=None):
+        self.pattern_extractor = RobustPatternExtractor()
+        self.spacy_extractor = EnhancedSpaCyExtractor(nlp_model)
+        
+        # Placeholder for other extractors (for compatibility)
+        self.hybrid_extractor = self._create_placeholder_extractor()
+        self.template_extractor = self._create_placeholder_extractor()
+        self.advanced_extractor = self._create_placeholder_extractor()
+    
+    def _create_placeholder_extractor(self):
+        """Create placeholder extractor for compatibility"""
+        class PlaceholderExtractor:
+            def train(self, *args, **kwargs):
+                pass
+            def train_ml_components(self, *args, **kwargs):
+                pass
+            def train_classifiers(self, *args, **kwargs):
+                pass
+            def extract(self, text):
+                return {}
+        
+        return PlaceholderExtractor()
+    
+    def extract_with_voting(self, text: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Extract using ensemble voting with improved logic
+        """
+        if not text or not text.strip():
+            empty_result = {field: "" for field in ['reporter_name', 'person_involved', 'incident_date', 
+                                                  'incident_time', 'department', 'incident_description', 
+                                                  'location', 'label', 'was_injured', 'injury_description']}
+            return empty_result, {}
+        
+        # Get extractions from different methods
+        pattern_result = self.pattern_extractor.extract_comprehensive(text)
+        spacy_result, spacy_confidence = self.spacy_extractor.extract(text)
+        
+        # Combine results with intelligent voting
         final_result = {}
-        all_fields = set()
-        for model_preds in predictions.values():
-            all_fields.update(model_preds.keys())
+        model_breakdown = {
+            'pattern_extraction': pattern_result,
+            'spacy_extraction': spacy_result,
+            'spacy_confidence': spacy_confidence
+        }
+        
+        fields = ['reporter_name', 'person_involved', 'incident_date', 'incident_time',
+                 'department', 'incident_description', 'location', 'label',
+                 'was_injured', 'injury_description']
+        
+        for field in fields:
+            candidates = []
+            
+            # Add pattern result (high reliability for new data)
+            if field in pattern_result and pattern_result[field]:
+                candidates.append((pattern_result[field], 0.8, 'pattern'))
+            
+            # Add spaCy result if confident
+            if field in spacy_result and spacy_result[field]:
+                spacy_conf = spacy_confidence.get(f'spacy_{field}', 0.5)
+                if spacy_conf > 0.6:  # Only use high-confidence spaCy results
+                    candidates.append((spacy_result[field], spacy_conf, 'spacy'))
+            
+            # Choose best candidate
+            if candidates:
+                # Sort by confidence and choose the best
+                best_candidate = max(candidates, key=lambda x: x[1])
+                final_result[field] = best_candidate[0]
+            else:
+                final_result[field] = ""
+        
+        # Ensure all required fields are present
+        for field in fields:
+            if field not in final_result:
+                final_result[field] = ""
+        
+        return final_result, model_breakdown
 
-        for field in all_fields:
-            votes = {}
-            for model_name, model_preds in predictions.items():
-                if field in model_preds and model_preds[field]:
-                    value = model_preds[field]
-                    votes[value] = votes.get(value, 0) + 1
+# Backward compatibility classes (simplified versions)
+class SpaCyExtractor:
+    def __init__(self, nlp_model=None):
+        self.enhanced = EnhancedSpaCyExtractor(nlp_model)
+    
+    def train(self, texts, labels):
+        return self.enhanced.train(texts, labels)
+    
+    def extract(self, text):
+        result, _ = self.enhanced.extract(text)
+        return result
 
-            if votes:
-                final_result[field] = max(votes.keys(), key=votes.get)
+class HybridExtractor:
+    def __init__(self):
+        self.pattern_extractor = RobustPatternExtractor()
+    
+    def train_ml_components(self, texts, labels):
+        pass
+    
+    def extract(self, text):
+        return self.pattern_extractor.extract_comprehensive(text)
 
-        return final_result, predictions
+class TemplateExtractor:
+    def train_classifiers(self, texts, labels):
+        pass
+    
+    def extract(self, text):

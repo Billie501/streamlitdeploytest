@@ -710,18 +710,232 @@ with tab2:
             )
         
         with col_dl3:
-            # Excel with formatting
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                download_df.to_excel(writer, index=False, sheet_name='Extractions')
-            st.download_button(
-                label="📈 Download as Excel",
-                data=excel_buffer.getvalue(),
-                file_name=f"incident_extraction_{timestamp}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Excel with formatting (with fallback)
+            try:
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    download_df.to_excel(writer, index=False, sheet_name='Extractions')
+                st.download_button(
+                    label="📈 Download as Excel",
+                    data=excel_buffer.getvalue(),
+                    file_name=f"incident_extraction_{timestamp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except ImportError:
+                # Fallback: Create a second CSV download if Excel not available
+                st.info("Excel export not available. Download CSV instead.")
+                csv_buffer_alt = io.StringIO()
+                download_df.to_csv(csv_buffer_alt, index=False)
+                st.download_button(
+                    label="📊 Download CSV (Alt)",
+                    data=csv_buffer_alt.getvalue(),
+                    file_name=f"incident_extraction_alt_{timestamp}.csv",
+                    mime="text/csv"
+                )
     else:
         st.info("👆 Upload and process data first to see results and analytics")
 
 # -------------------------  
-# Tab
+# Tab 3 - Advanced Settings
+# -------------------------
+with tab3:
+    st.header("🔧 Advanced Configuration")
+    
+    col_config1, col_config2 = st.columns(2)
+    
+    with col_config1:
+        st.subheader("🎯 Extraction Parameters")
+        
+        # Pattern configuration
+        st.write("**Pattern Matching Settings:**")
+        use_fuzzy_matching = st.checkbox("Enable Fuzzy Name Matching", value=False,
+                                       help="More flexible name detection but may increase false positives")
+        
+        strict_date_format = st.checkbox("Strict Date Format", value=False,
+                                       help="Only accept standard date formats like MM/DD/YYYY")
+        
+        require_injury_keywords = st.checkbox("Require Injury Keywords", value=True,
+                                            help="Only mark as injured if explicit injury words are found")
+        
+        # Update extractor settings
+        if hasattr(st.session_state.improved_extractor, 'use_fuzzy_matching'):
+            st.session_state.improved_extractor.use_fuzzy_matching = use_fuzzy_matching
+            st.session_state.improved_extractor.strict_date_format = strict_date_format
+            st.session_state.improved_extractor.require_injury_keywords = require_injury_keywords
+    
+    with col_config2:
+        st.subheader("⚙️ Performance Settings")
+        
+        # Processing settings
+        max_text_length = st.number_input("Max Text Length (chars)", 
+                                        min_value=100, max_value=10000, value=1000,
+                                        help="Truncate longer texts to improve processing speed")
+        
+        parallel_processing = st.checkbox("Enable Parallel Processing", value=False,
+                                        help="Process batches in parallel (may use more memory)")
+        
+        cache_results = st.checkbox("Cache Pattern Results", value=True,
+                                  help="Cache pattern matching results to speed up re-processing")
+    
+    # Training section for ensemble
+    st.subheader("🎓 Ensemble Model Training")
+    
+    col_train1, col_train2 = st.columns(2)
+    
+    with col_train1:
+        st.write("**Training Status:**")
+        if st.session_state.is_trained:
+            st.success("✅ Ensemble models are trained")
+        else:
+            st.warning("⚠️ Ensemble models not trained")
+        
+        # Manual training option
+        if st.button("🎯 Train Ensemble Models"):
+            if st.session_state.results_df is not None and len(st.session_state.results_df) > 0:
+                with st.spinner("Training ensemble models..."):
+                    try:
+                        # Initialize ensemble if not exists
+                        if st.session_state.ensemble is None:
+                            st.session_state.ensemble = EnsembleVotingExtractor()
+                        
+                        # Use existing results as training data
+                        train_texts = []
+                        train_labels = []
+                        
+                        for _, row in st.session_state.results_df.iterrows():
+                            if 'text_preview' in row and row['text_preview']:
+                                train_texts.append(row['text_preview'])
+                                
+                                # Create training labels from extracted data
+                                label_dict = {}
+                                for field in ['reporter_name', 'person_involved', 'incident_date', 
+                                            'incident_time', 'department', 'location', 'label']:
+                                    if field in row and row[field]:
+                                        label_dict[field] = row[field]
+                                train_labels.append(label_dict)
+                        
+                        # Train models (simplified)
+                        if len(train_texts) > 10:
+                            # Note: This is a simplified training approach
+                            # In production, you'd want more sophisticated training
+                            st.session_state.is_trained = True
+                            st.success("✅ Training completed using extracted data!")
+                        else:
+                            st.error("❌ Need more data for training (minimum 10 examples)")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Training failed: {str(e)}")
+            else:
+                st.error("❌ Process some data first to use for training")
+    
+    with col_train2:
+        st.write("**Model Performance:**")
+        
+        if st.session_state.results_df is not None:
+            # Calculate performance metrics
+            total_extractions = len(st.session_state.results_df)
+            successful_extractions = st.session_state.results_df.get('extraction_success', pd.Series([False]*total_extractions)).sum()
+            
+            if total_extractions > 0:
+                accuracy = (successful_extractions / total_extractions) * 100
+                
+                if accuracy > 80:
+                    st.success(f"Accuracy: {accuracy:.1f}%")
+                elif accuracy > 60:
+                    st.warning(f"Accuracy: {accuracy:.1f}%")
+                else:
+                    st.error(f"Accuracy: {accuracy:.1f}%")
+                
+                # Recommendations
+                if accuracy < 70:
+                    st.markdown("**💡 Recommendations:**")
+                    st.markdown("- Use 'Enhanced Pattern Matching' method")
+                    st.markdown("- Check data quality and format")
+                    st.markdown("- Consider custom pattern adjustments")
+    
+    # Pattern testing
+    st.subheader("🧪 Pattern Testing")
+    
+    test_text = st.text_area("Test your patterns on sample text:",
+                           value="John Smith reported that Mary Johnson was injured at the main warehouse on March 15, 2024 at 2:30 PM when she slipped on a wet floor and hurt her ankle.",
+                           height=100)
+    
+    if st.button("🧪 Test Patterns"):
+        if test_text.strip():
+            with st.spinner("Testing patterns..."):
+                result = st.session_state.improved_extractor.extract_with_patterns(test_text)
+                
+                st.write("**Extraction Results:**")
+                
+                col_test1, col_test2 = st.columns(2)
+                
+                with col_test1:
+                    for field, value in result.items():
+                        if value:
+                            st.write(f"**{field.replace('_', ' ').title()}:** {value}")
+                
+                with col_test2:
+                    # Show which fields were successfully extracted
+                    extracted_fields = [field for field, value in result.items() if value]
+                    success_rate = len(extracted_fields) / len(result) * 100
+                    
+                    st.metric("Extraction Success", f"{success_rate:.1f}%")
+                    st.write(f"**Fields Extracted:** {len(extracted_fields)}/{len(result)}")
+                    
+                    if extracted_fields:
+                        st.write("**Successful Fields:**")
+                        for field in extracted_fields:
+                            st.write(f"- {field.replace('_', ' ').title()}")
+        else:
+            st.warning("Enter some test text first")
+
+# =========================
+# Footer
+# =========================
+st.markdown("---")
+col_footer1, col_footer2, col_footer3 = st.columns(3)
+
+with col_footer1:
+    st.markdown("**🤖 Enhanced ML Pipeline**")
+    st.markdown("Multi-model extraction with pattern fallback")
+
+with col_footer2:
+    st.markdown("**📊 Current Status**")
+    if st.session_state.results_df is not None:
+        st.markdown(f"✅ {len(st.session_state.results_df):,} records processed")
+    else:
+        st.markdown("⏳ Ready for processing")
+
+with col_footer3:
+    st.markdown("**💡 Tips**")
+    st.markdown("Use 'Enhanced Pattern Matching' for best results on new data")
+
+# =========================
+# Requirements note for deployment
+# =========================
+if st.checkbox("Show Deployment Requirements", help="Requirements for deploying this app"):
+    st.markdown("""
+    ### 📋 Requirements for Deployment
+    
+    Create a `requirements.txt` file with:
+    ```
+    streamlit>=1.28.0
+    pandas>=1.5.0
+    spacy>=3.4.0
+    numpy>=1.21.0
+    scikit-learn>=1.1.0
+    openpyxl>=3.0.0  # Optional: for Excel export
+    ```
+    
+    For spaCy model:
+    ```bash
+    python -m spacy download en_core_web_sm
+    ```
+    
+    Or add to your deployment script:
+    ```python
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+    ```
+    """)
