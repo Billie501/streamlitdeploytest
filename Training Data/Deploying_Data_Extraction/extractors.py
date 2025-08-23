@@ -412,3 +412,5 @@ class TemplateExtractor:
         pass
     
     def extract(self, text):
+        # Placeholder implementation
+        return {}
