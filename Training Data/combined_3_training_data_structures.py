@@ -157,7 +157,7 @@ def generate_natural_text(fields):
     return " ".join([part for part in text_parts if part.strip()])
 
 # Generate merged unstructured text
-def generate_full_text(fields):
+def generate_text(fields):
     keys = list(fields.keys())
     random.shuffle(keys)
     text = " ".join([f"{k.replace('_', ' ').title()}: {fields[k]}" for k in keys])
@@ -185,8 +185,8 @@ with open(structured_file, 'w', newline='') as structured_csv, \
         'department', 'incident_description', 'location', 'label',
         'was_injured', 'injury_description'
     ])
-    unstructured_writer.writerow(['full_text'])
-    slight_structure_writer.writerow(['full_text'])
+    unstructured_writer.writerow(['text'])
+    slight_structure_writer.writerow(['text'])
     
     for label, count in labels.items():
         for _ in range(count):
@@ -226,5 +226,5 @@ with open(structured_file, 'w', newline='') as structured_csv, \
             unstructured_writer.writerow([unstructured_text])
 
             # Slightly structured text
-            slight_structure_text = generate_full_text(fields)
+            slight_structure_text = generate_text(fields)
             slight_structure_writer.writerow([slight_structure_text])
