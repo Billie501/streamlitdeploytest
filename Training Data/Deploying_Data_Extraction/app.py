@@ -259,7 +259,11 @@ if st.session_state.results_df is not None:
     st.subheader("Sample Results")
     
     # Show clean results
-    clean_results = df_results[df_results['error'].isna() if 'error' in df_results.columns else df_results]
+    if 'error' in df_results.columns:
+        clean_results = df_results[df_results['error'].isna()]
+    else:
+        clean_results = df_results
+        
     if len(clean_results) > 0:
         display_cols = [col for col in clean_results.columns 
                        if col not in ['original_index', 'error']]
