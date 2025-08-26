@@ -242,7 +242,11 @@ if st.session_state.results_df is not None:
     field_stats = []
     for field in desired_fields:
         if field in df_results.columns:
-            non_empty = df_results[field].notna() & (df_results[field] != "") & (df_results[field] != "None")
+            # More robust check for meaningful content
+            non_empty = (df_results[field].notna() & 
+                        (df_results[field] != "") & 
+                        (df_results[field] != "None") &
+                        (df_results[field].astype(str).str.strip() != ""))
             success_count = non_empty.sum()
             success_rate = (success_count / len(df_results)) * 100
             field_stats.append({
