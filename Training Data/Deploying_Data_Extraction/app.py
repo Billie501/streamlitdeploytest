@@ -1,4 +1,5 @@
 # app.py
+from sheets import display_google_sheets_section
 import streamlit as st
 import pandas as pd
 import time
@@ -83,6 +84,21 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error loading file: {str(e)}")
         st.stop()
+
+# =========================
+# Google Sheets Section
+# =========================
+df_sheets = display_google_sheets_section(
+    service_account_file="path/to/service_account.json",
+    spreadsheet_name="Botpress Chat Output",
+    worksheet_name="Sheet1",
+)
+
+# If Google Sheets data is fetched, treat it like uploaded CSV
+if df_sheets is not None:
+    df = df_sheets  # reuse the same variable your pipeline expects
+    uploaded_file = "GoogleSheets"  # dummy marker so the rest of the pipeline runs
+
 
 # =========================
 # Processing Options
