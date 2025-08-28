@@ -89,9 +89,8 @@ if uploaded_file is not None:
 # Google Sheets Section
 # =========================
 df_sheets = display_google_sheets_section(
-    service_account_file="path/to/service_account.json",
-    spreadsheet_name="Botpress Chat Output",
-    worksheet_name="Sheet1",
+    spreadsheet_name="Botpress Chat Output",  # 👈 keep your sheet name
+    worksheet_name="Sheet1",                  # 👈 adjust if needed
 )
 
 # If Google Sheets data is fetched, treat it like uploaded CSV
