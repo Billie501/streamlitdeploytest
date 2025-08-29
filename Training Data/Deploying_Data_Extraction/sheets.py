@@ -14,7 +14,11 @@ def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "
 
     if st.button("Fetch Google Sheets Data", use_container_width=True):
         try:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+            # Use broader scopes: spreadsheets + drive
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive.readonly"
+            ]
 
             # Load credentials from st.secrets
             creds = Credentials.from_service_account_info(
@@ -23,6 +27,10 @@ def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "
             )
             gc = gspread.authorize(creds)
 
+            # Debug: show which service account is being used
+            st.write("🔑 Using service account:", st.secrets["gcp_service_account"]["client_email"])
+
+            # Access sheet + worksheet
             sh = gc.open(spreadsheet_name)
             worksheet = sh.worksheet(worksheet_name)
             all_rows = worksheet.get_all_records()
