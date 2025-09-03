@@ -4,6 +4,24 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
+
+def make_unique_headers(headers):
+    """Ensure headers are unique and non-empty."""
+    seen = {}
+    new_headers = []
+    for i, h in enumerate(headers):
+        h = h.strip() if h else ""  # remove whitespace
+        if h == "":
+            h = f"col_{i+1}"  # replace empty with col_#
+        if h in seen:
+            seen[h] += 1
+            h = f"{h}_{seen[h]}"  # rename duplicate
+        else:
+            seen[h] = 0
+        new_headers.append(h)
+    return new_headers
+
+
 def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """
     Display a Google Sheets section in Streamlit and return a DataFrame.
@@ -18,7 +36,7 @@ def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "
             # Use broader scopes: spreadsheets + drive
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.readonly"
+                "https://www.googleapis.com/auth/drive.readonly",
             ]
 
             # Load credentials from st.secrets
@@ -29,7 +47,10 @@ def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "
             gc = gspread.authorize(creds)
 
             # Debug: show which service account is being used
-            st.write("🔑 Using service account:", st.secrets["gcp_service_account"]["client_email"])
+            st.write(
+                "🔑 Using service account:",
+                st.secrets["gcp_service_account"]["client_email"],
+            )
 
             # Access sheet + worksheet
             sh = gc.open(spreadsheet_name)
@@ -44,15 +65,14 @@ def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "
 
             # First row = headers (may contain duplicates/empties)
             raw_headers = values[0]
-
-            # Deduplicate headers using Pandas internal helper
-            parser = pd.io.parsers.ParserBase({'names': raw_headers})
-            headers = parser._maybe_dedup_names(raw_headers)
+            headers = make_unique_headers(raw_headers)
 
             # Remaining rows = data
             df = pd.DataFrame(values[1:], columns=headers)
 
-            st.success(f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})")
+            st.success(
+                f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})"
+            )
             st.dataframe(df.tail(5), use_container_width=True)
 
             return df
