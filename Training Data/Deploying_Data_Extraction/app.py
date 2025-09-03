@@ -1,5 +1,5 @@
 # app.py
-from sheets import display_google_sheets_section
+from sheets import display_google_sheets_section, preprocess_dataframe
 import streamlit as st
 import pandas as pd
 import time
@@ -50,54 +50,107 @@ st.title("📊 Incident Report Entity Extractor")
 st.write("Extract structured data from unstructured incident reports using pattern matching and machine learning.")
 
 # =========================
-# File Upload Section
+# Data Import Section
 # =========================
-st.header("📁 Upload Data")
+st.header("📁 Data Import")
 
-uploaded_file = st.file_uploader(
-    "Upload your CSV file with incident reports",
-    type=["csv"],
-    help="CSV must contain a 'text' column with incident descriptions"
+# Data source selection
+data_source = st.radio(
+    "Choose your data source:",
+    options=["File Upload", "Google Sheets"],
+    horizontal=True
 )
 
-if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file)
-        
-        if "text" not in df.columns:
-            st.error("CSV must contain a 'text' column")
+# Preprocessing toggle
+apply_preprocessing = st.checkbox(
+    "🛠️ Apply preprocessing (clean headers, remove empty rows, fill NaN values)",
+    value=True,
+    help="Recommended for better data quality"
+)
+
+df = None
+uploaded_file = None
+
+if data_source == "File Upload":
+    uploaded_file = st.file_uploader(
+        "Upload your CSV file with incident reports",
+        type=["csv"],
+        help="CSV must contain a 'text' column with incident descriptions"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.success(f"✅ File uploaded successfully: {uploaded_file.name}")
+            
+        except Exception as e:
+            st.error(f"Error loading file: {str(e)}")
             st.stop()
+
+elif data_source == "Google Sheets":
+    if st.button("Fetch Google Sheets Data", type="primary", use_container_width=True):
+        df_sheets = display_google_sheets_section(
+            spreadsheet_name="Botpress Chat Output",
+            worksheet_name="Sheet2"
+        )
         
-        # Data summary
-        valid_rows = df['text'].notna().sum()
-        empty_rows = len(df) - valid_rows
+        if df_sheets is not None:
+            df = df_sheets
+            uploaded_file = "GoogleSheets"  # marker for processing pipeline
+            st.success("✅ Google Sheets data fetched successfully")
+
+# Apply preprocessing if requested and data is available
+if df is not None and apply_preprocessing:
+    with st.spinner("Applying preprocessing..."):
+        df_original = df.copy()
+        df = preprocess_dataframe(df)
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Rows", f"{len(df):,}")
-        col2.metric("Valid Rows", f"{valid_rows:,}")
-        col3.metric("Empty Rows", f"{empty_rows:,}")
+        # Show preprocessing results
+        with st.expander("📊 Preprocessing Results", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Before Preprocessing")
+                st.write(f"Shape: {df_original.shape}")
+                st.write("Columns:", list(df_original.columns))
+                st.dataframe(df_original.head(3), use_container_width=True)
+            
+            with col2:
+                st.subheader("After Preprocessing")
+                st.write(f"Shape: {df.shape}")
+                st.write("Columns:", list(df.columns))
+                st.dataframe(df.head(3), use_container_width=True)
         
-        # Preview data
-        with st.expander("Data Preview"):
-            st.dataframe(df.head(), use_container_width=True)
-        
-    except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
+        st.info("✨ Preprocessing applied: headers cleaned, empty rows removed, NaN values filled")
+
+# Validate data structure
+if df is not None:
+    # Check for text column (handle both original and preprocessed column names)
+    text_columns = [col for col in df.columns if 'text' in col.lower()]
+    
+    if not text_columns:
+        st.error("❌ No 'text' column found. Your data must contain a column with 'text' in the name for incident descriptions.")
+        st.write("Available columns:", list(df.columns))
         st.stop()
-
-# =========================
-# Google Sheets Section
-# =========================
-df_sheets = display_google_sheets_section(
-    spreadsheet_name="Botpress Chat Output",  # 👈 keep your sheet name
-    worksheet_name="Sheet2",                  # 👈 adjust if needed
-)
-
-# If Google Sheets data is fetched, treat it like uploaded CSV
-if df_sheets is not None:
-    df = df_sheets  # reuse the same variable your pipeline expects
-    uploaded_file = "GoogleSheets"  # dummy marker so the rest of the pipeline runs
-
+    else:
+        # Use the first text column found
+        text_column = text_columns[0]
+        if text_column != 'text':
+            df = df.rename(columns={text_column: 'text'})
+            st.info(f"✅ Using column '{text_column}' as the text column")
+    
+    # Data summary
+    valid_rows = df['text'].notna().sum()
+    empty_rows = len(df) - valid_rows
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Rows", f"{len(df):,}")
+    col2.metric("Valid Rows", f"{valid_rows:,}")
+    col3.metric("Empty Rows", f"{empty_rows:,}")
+    
+    # Preview data
+    with st.expander("📋 Data Preview"):
+        st.dataframe(df.head(), use_container_width=True)
 
 # =========================
 # Processing Options
