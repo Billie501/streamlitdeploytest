@@ -32,15 +32,17 @@ def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2") -> pd.DataFrame | None:
+def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """Fetch data from a specific Google Sheets worksheet and return DataFrame."""
     try:
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive.readonly",
         ]
+
         creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"], scopes=scopes
+            st.secrets["gcp_service_account"],
+            scopes=scopes,
         )
         gc = gspread.authorize(creds)
 
@@ -61,6 +63,7 @@ def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2") -
 
         st.success(f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})")
         st.dataframe(df.head(5), use_container_width=True)
+
         return df
 
     except Exception as e:
@@ -68,16 +71,15 @@ def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2") -
         return None
 
 
-def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2") -> pd.DataFrame | None:
+def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """
-    Streamlit UI to select data source (Google Sheets or upload) with preprocessing toggle.
-    Returns a DataFrame according to user choice.
+    Streamlit section to let users choose between Google Sheets (Sheet2) or file upload.
+    Returns a preprocessed DataFrame.
     """
     st.markdown("---")
     st.header("📊 Import Data")
 
-    # Step 1: Choose data source
-    source_option = st.radio(
+    option = st.radio(
         "Choose a data source:",
         ("Google Sheets (Sheet2)", "Upload a file"),
         horizontal=True,
@@ -85,15 +87,11 @@ def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2") 
 
     df = None
 
-    # Step 2: Checkbox for preprocessing
-    apply_preprocessing = st.checkbox("🛠️ Apply preprocessing", value=True, help="Toggle preprocessing for raw data")
-
-    # Step 3: Fetch or upload
-    if source_option == "Google Sheets (Sheet2)":
+    if option == "Google Sheets (Sheet2)":
         if st.button("Fetch Google Sheets Data", use_container_width=True):
             df = fetch_google_sheets(spreadsheet_name, worksheet_name)
 
-    elif source_option == "Upload a file":
+    elif option == "Upload a file":
         uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
         if uploaded_file:
             if uploaded_file.name.endswith(".csv"):
@@ -104,24 +102,21 @@ def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2") 
             st.success(f"✅ Uploaded {uploaded_file.name}")
             st.dataframe(df.head(5), use_container_width=True)
 
-    # Step 4: Apply preprocessing if selected
     if df is not None:
-        if apply_preprocessing:
-            df = preprocess_dataframe(df)
-            st.markdown("### 🛠️ Preprocessed Data")
-        else:
-            st.markdown("### 📄 Raw Data")
+        df = preprocess_dataframe(df)
 
+        st.markdown("### 🛠️ Preprocessed Data")
         st.dataframe(df.head(10), use_container_width=True)
+
         return df
 
     return None
 
 
-# Backward compatibility for your existing app.py
-def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2") -> pd.DataFrame | None:
+# 🔄 Backward compatibility wrapper so app.py keeps working
+def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """
-    Wrapper to maintain backward compatibility.
-    Returns Google Sheets data without preprocessing.
+    Wrapper to maintain compatibility with app.py.
+    Uses the same logic as display_data_section but defaults to Sheet2.
     """
     return fetch_google_sheets(spreadsheet_name, worksheet_name)
