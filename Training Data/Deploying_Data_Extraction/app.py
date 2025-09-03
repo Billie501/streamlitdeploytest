@@ -390,32 +390,18 @@ if st.session_state.results_df is not None:
         )
 
 # =========================
-# Testing Section
+# Reset Section
 # =========================
-with st.expander("🧪 Test Pattern Extraction"):
-    test_text = st.text_area(
-        "Test your extraction on sample text:",
-        value="John Smith reported that Mary Johnson was injured at the warehouse on March 15, 2024 at 2:30 PM when she slipped and cut her hand.",
-        height=100
-    )
-    
-    if st.button("Test Extraction"):
-        if test_text.strip():
-            pattern_extractor = RobustPatternExtractor()
-            result = pattern_extractor.extract_comprehensive(test_text)
-            
-            st.subheader("Extraction Results:")
-            
-            for field, value in result.items():
-                if value:
-                    st.write(f"**{field.replace('_', ' ').title()}:** {value}")
-            
-            # Success rate
-            extracted_fields = [field for field, value in result.items() if value]
-            success_rate = len(extracted_fields) / len(result) * 100
-            st.metric("Extraction Success", f"{success_rate:.1f}%")
-        else:
-            st.warning("Enter some test text first")
+st.markdown("---")
+st.header("🔄 Reset Application")
+st.write("Use this to start fresh with a new data source or processing run.")
+
+if st.button("🔄 Reset App", type="secondary", use_container_width=True):
+    # Clear all session state
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.success("✅ Application reset! Please refresh the page or use the data source selection above.")
+    st.rerun()
 
 # =========================
 # Footer
