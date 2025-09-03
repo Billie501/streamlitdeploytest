@@ -22,63 +22,101 @@ def make_unique_headers(headers):
     return new_headers
 
 
-def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
+def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply standard preprocessing to a DataFrame."""
+    df = df.dropna(how="all")  # drop fully empty rows
+    df = df.fillna("Missing")  # replace NaN
+    df.columns = [
+        c.strip().lower().replace(" ", "_") for c in df.columns
+    ]  # clean headers
+    return df
+
+
+def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
+    """Fetch data from a specific Google Sheets worksheet and return DataFrame."""
+    try:
+        # Use broader scopes: spreadsheets + drive
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
+
+        # Load credentials from st.secrets
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=scopes,
+        )
+        gc = gspread.authorize(creds)
+
+        # Debug: show which service account is being used
+        st.write("🔑 Using service account:", st.secrets["gcp_service_account"]["client_email"])
+
+        # Access sheet + worksheet (forces Sheet2 by default)
+        sh = gc.open(spreadsheet_name)
+        worksheet = sh.worksheet(worksheet_name)
+
+        # Fetch raw values
+        values = worksheet.get_all_values()
+
+        if not values:
+            st.warning("⚠️ The worksheet is empty.")
+            return None
+
+        # First row = headers (may contain duplicates/empties)
+        raw_headers = values[0]
+        headers = make_unique_headers(raw_headers)
+
+        # Remaining rows = data
+        df = pd.DataFrame(values[1:], columns=headers)
+
+        st.success(f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})")
+        st.dataframe(df.head(5), use_container_width=True)
+
+        return df
+
+    except Exception as e:
+        st.error(f"❌ Failed to fetch Google Sheets data: {e}")
+        return None
+
+
+def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """
-    Display a Google Sheets section in Streamlit and return a DataFrame.
-    Credentials are loaded from st.secrets (configured in .streamlit/secrets.toml).
-    Uses get_all_values() to avoid duplicate header issues.
+    Streamlit section to let users choose between Google Sheets (Sheet2) or file upload.
+    Returns a preprocessed DataFrame.
     """
     st.markdown("---")
-    st.header("📑 Import Data from Google Sheets")
+    st.header("📊 Import Data")
 
-    if st.button("Fetch Google Sheets Data", use_container_width=True):
-        try:
-            # Use broader scopes: spreadsheets + drive
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.readonly",
-            ]
+    option = st.radio(
+        "Choose a data source:",
+        ("Google Sheets (Sheet2)", "Upload a file"),
+        horizontal=True,
+    )
 
-            # Load credentials from st.secrets
-            creds = Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
-                scopes=scopes,
-            )
-            gc = gspread.authorize(creds)
+    df = None
 
-            # Debug: show which service account is being used
-            st.write(
-                "🔑 Using service account:",
-                st.secrets["gcp_service_account"]["client_email"],
-            )
+    if option == "Google Sheets (Sheet2)":
+        if st.button("Fetch Google Sheets Data", use_container_width=True):
+            df = fetch_google_sheets(spreadsheet_name, worksheet_name)
 
-            # Access sheet + worksheet
-            sh = gc.open(spreadsheet_name)
-            worksheet = sh.worksheet(worksheet_name)
+    elif option == "Upload a file":
+        uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
+        if uploaded_file:
+            if uploaded_file.name.endswith(".csv"):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
 
-            # Fetch raw values
-            values = worksheet.get_all_values()
+            st.success(f"✅ Uploaded {uploaded_file.name}")
+            st.dataframe(df.head(5), use_container_width=True)
 
-            if not values:
-                st.warning("⚠️ The worksheet is empty.")
-                return None
+    # 🔄 Apply preprocessing if data is loaded
+    if df is not None:
+        df = preprocess_dataframe(df)
 
-            # First row = headers (may contain duplicates/empties)
-            raw_headers = values[0]
-            headers = make_unique_headers(raw_headers)
+        st.markdown("### 🛠️ Preprocessed Data")
+        st.dataframe(df.head(10), use_container_width=True)
 
-            # Remaining rows = data
-            df = pd.DataFrame(values[1:], columns=headers)
-
-            st.success(
-                f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})"
-            )
-            st.dataframe(df.tail(5), use_container_width=True)
-
-            return df
-
-        except Exception as e:
-            st.error(f"❌ Failed to fetch Google Sheets data: {e}")
-            return None
+        return df
 
     return None
