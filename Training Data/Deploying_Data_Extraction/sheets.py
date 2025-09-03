@@ -4,7 +4,7 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
-def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet1"):
+def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """
     Display a Google Sheets section in Streamlit and return a DataFrame.
     Credentials are loaded from st.secrets (configured in .streamlit/secrets.toml).
