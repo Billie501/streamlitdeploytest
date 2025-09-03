@@ -35,38 +35,30 @@ def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def fetch_google_sheets(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
     """Fetch data from a specific Google Sheets worksheet and return DataFrame."""
     try:
-        # Use broader scopes: spreadsheets + drive
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive.readonly",
         ]
 
-        # Load credentials from st.secrets
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=scopes,
         )
         gc = gspread.authorize(creds)
 
-        # Debug: show which service account is being used
         st.write("🔑 Using service account:", st.secrets["gcp_service_account"]["client_email"])
 
-        # Access sheet + worksheet (forces Sheet2 by default)
         sh = gc.open(spreadsheet_name)
         worksheet = sh.worksheet(worksheet_name)
 
-        # Fetch raw values
         values = worksheet.get_all_values()
-
         if not values:
             st.warning("⚠️ The worksheet is empty.")
             return None
 
-        # First row = headers (may contain duplicates/empties)
         raw_headers = values[0]
         headers = make_unique_headers(raw_headers)
 
-        # Remaining rows = data
         df = pd.DataFrame(values[1:], columns=headers)
 
         st.success(f"✅ Fetched {len(df)} rows from **{spreadsheet_name}** ({worksheet_name})")
@@ -110,7 +102,6 @@ def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
             st.success(f"✅ Uploaded {uploaded_file.name}")
             st.dataframe(df.head(5), use_container_width=True)
 
-    # 🔄 Apply preprocessing if data is loaded
     if df is not None:
         df = preprocess_dataframe(df)
 
@@ -120,3 +111,12 @@ def display_data_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
         return df
 
     return None
+
+
+# 🔄 Backward compatibility wrapper so app.py keeps working
+def display_google_sheets_section(spreadsheet_name: str, worksheet_name: str = "Sheet2"):
+    """
+    Wrapper to maintain compatibility with app.py.
+    Uses the same logic as display_data_section but defaults to Sheet2.
+    """
+    return fetch_google_sheets(spreadsheet_name, worksheet_name)
