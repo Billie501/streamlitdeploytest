@@ -1,3 +1,4 @@
+#app.py
 # app.py
 from sheets import display_google_sheets_section
 import streamlit as st
@@ -20,6 +21,7 @@ from extractors import RobustPatternExtractor, EnsembleVotingExtractor
 # =========================
 @st.cache_resource
 def load_spacy_model():
+    """Load spaCy model with fallback."""
     try:
         nlp = spacy.load("en_core_web_sm")
         return nlp
@@ -37,27 +39,7 @@ st.set_page_config(
 )
 
 # =========================
-# Reset Button
-# =========================
-def reset_app():
-    for key in st.session_state.keys():
-        del st.session_state[key]
-    st.experimental_rerun()
-
-st.sidebar.button("🔄 Reset App", on_click=reset_app, help="Clear all data and restart app")
-
-# =========================
-# Data Source Selection
-# =========================
-data_source = st.radio(
-    "Choose your data source:",
-    options=["File Upload", "Google Sheets"],
-    index=0,
-    horizontal=True
-)
-
-# =========================
-# Session State for Results
+# Session State
 # =========================
 if "results_df" not in st.session_state:
     st.session_state.results_df = None
@@ -68,42 +50,55 @@ if "results_df" not in st.session_state:
 st.title("📊 Incident Report Entity Extractor")
 st.write("Extract structured data from unstructured incident reports using pattern matching and machine learning.")
 
-df = None
-uploaded_file = None
-
 # =========================
 # File Upload Section
 # =========================
-if data_source == "File Upload":
-    st.header("📁 Upload Data")
-    uploaded_file = st.file_uploader(
-        "Upload your CSV file with incident reports",
-        type=["csv"],
-        help="CSV must contain a 'text' column with incident descriptions"
-    )
+st.header("📁 Upload Data")
 
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            if "text" not in df.columns:
-                st.error("CSV must contain a 'text' column")
-                st.stop()
-        except Exception as e:
-            st.error(f"Error loading file: {str(e)}")
+uploaded_file = st.file_uploader(
+    "Upload your CSV file with incident reports",
+    type=["csv"],
+    help="CSV must contain a 'text' column with incident descriptions"
+)
+
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        if "text" not in df.columns:
+            st.error("CSV must contain a 'text' column")
             st.stop()
+        
+        # Data summary
+        valid_rows = df['text'].notna().sum()
+        empty_rows = len(df) - valid_rows
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Rows", f"{len(df):,}")
+        col2.metric("Valid Rows", f"{valid_rows:,}")
+        col3.metric("Empty Rows", f"{empty_rows:,}")
+        
+        # Preview data
+        with st.expander("Data Preview"):
+            st.dataframe(df.head(), use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error loading file: {str(e)}")
+        st.stop()
 
 # =========================
 # Google Sheets Section
 # =========================
-elif data_source == "Google Sheets":
-    st.header("📋 Google Sheets Data")
-    df_sheets = display_google_sheets_section(
-        spreadsheet_name="Botpress Chat Output",
-        worksheet_name="Sheet2",
-    )
-    if df_sheets is not None:
-        df = df_sheets
-        uploaded_file = "GoogleSheets"
+df_sheets = display_google_sheets_section(
+    spreadsheet_name="Botpress Chat Output",  # 👈 keep your sheet name
+    worksheet_name="Sheet2",                  # 👈 adjust if needed
+)
+
+# If Google Sheets data is fetched, treat it like uploaded CSV
+if df_sheets is not None:
+    df = df_sheets  # reuse the same variable your pipeline expects
+    uploaded_file = "GoogleSheets"  # dummy marker so the rest of the pipeline runs
+
 
 # =========================
 # Processing Options
