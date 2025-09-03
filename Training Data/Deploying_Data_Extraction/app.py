@@ -90,7 +90,7 @@ if uploaded_file is not None:
 # =========================
 df_sheets = display_google_sheets_section(
     spreadsheet_name="Botpress Chat Output",  # 👈 keep your sheet name
-    worksheet_name="Sheet1",                  # 👈 adjust if needed
+    worksheet_name="Sheet2",                  # 👈 adjust if needed
 )
 
 # If Google Sheets data is fetched, treat it like uploaded CSV
